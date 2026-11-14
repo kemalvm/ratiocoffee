@@ -13,11 +13,16 @@ class Expense extends Model
         'outlet_id', 'category_id', 'created_by', 'approved_by',
         'reference_number', 'expense_date', 'amount', 'description',
         'attachment', 'status', 'payment_method', 'notes',
+        'name', 'frequency', 'reminder_day', 'reminder_date',
+        'bank_name', 'bank_account', 'account_holder', 'is_revenue_sharing',
     ];
 
     protected $casts = [
-        'expense_date' => 'date',
-        'amount'       => 'decimal:2',
+        'expense_date'       => 'date',
+        'amount'             => 'decimal:2',
+        'is_revenue_sharing' => 'boolean',
+        'reminder_day'       => 'integer',
+        'reminder_date'      => 'integer',
     ];
 
     // ── Relationships ────────────────────────────────────────────────────

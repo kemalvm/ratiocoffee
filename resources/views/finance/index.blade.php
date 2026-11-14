@@ -275,8 +275,8 @@ function financeApp() {
 
         async loadMeta() {
             try {
-                const c = await axios.get('/api/v1/expense-categories');
-                this.categories = c.data.data ?? c.data ?? [];
+                const c = await axios.get('/api/v1/finance/expense-categories');
+                this.categories = c.data.data ?? c.data.categories ?? c.data ?? [];
             } catch(e) {}
         },
 

@@ -183,9 +183,16 @@ class ReportController extends Controller
             ->whereBetween(DB::raw('DATE(created_at)'), [$startDate, $endDate])
             ->sum('total_cost');
 
-        // Operating Expenses from Expenses table
+        // Operating Expenses from Expenses table (exclude inventory purchases to stop double-counting with COGS)
         $operatingExpense = (float) Expense::whereBetween('expense_date', [$startDate, $endDate])
             ->where('status', '!=', 'rejected')
+            ->where(function ($q) {
+                $q->whereNull('notes')
+                  ->orWhere('notes', 'not like', '%Auto-generated%');
+            })
+            ->where('description', 'not like', '%Kulakan%')
+            ->where('description', 'not like', '%Restock%')
+            ->where('description', 'not like', '%Inventory%')
             ->sum('amount');
 
         $grossProfit   = $revenue - $cogs;
@@ -194,10 +201,17 @@ class ReportController extends Controller
         $grossMargin   = $revenue > 0 ? round(($grossProfit / $revenue) * 100, 1) : 0;
         $netMargin     = $revenue > 0 ? round(($netProfit   / $revenue) * 100, 1) : 0;
 
-        // Expense breakdown by category
+        // Expense breakdown by category (excluding double-counted inventory purchases)
         $expenseBreakdown = Expense::with('category')
             ->whereBetween('expense_date', [$startDate, $endDate])
             ->where('status', '!=', 'rejected')
+            ->where(function ($q) {
+                $q->whereNull('notes')
+                  ->orWhere('notes', 'not like', '%Auto-generated%');
+            })
+            ->where('description', 'not like', '%Kulakan%')
+            ->where('description', 'not like', '%Restock%')
+            ->where('description', 'not like', '%Inventory%')
             ->selectRaw('category_id, SUM(amount) as total')
             ->groupBy('category_id')
             ->get()
@@ -221,7 +235,15 @@ class ReportController extends Controller
             $mCogs = (float) PosOrder::whereIn('status', $this->validStatuses)
                 ->whereBetween(DB::raw('DATE(created_at)'), [$mStart, $mEnd])->sum('total_cost');
             $mExp  = (float) Expense::whereBetween('expense_date', [$mStart, $mEnd])
-                ->where('status', '!=', 'rejected')->sum('amount');
+                ->where('status', '!=', 'rejected')
+                ->where(function ($q) {
+                    $q->whereNull('notes')
+                      ->orWhere('notes', 'not like', '%Auto-generated%');
+                })
+                ->where('description', 'not like', '%Kulakan%')
+                ->where('description', 'not like', '%Restock%')
+                ->where('description', 'not like', '%Inventory%')
+                ->sum('amount');
 
             $monthlyData[] = [
                 'label'       => $curr->format('M Y'),

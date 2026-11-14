@@ -23,7 +23,6 @@ Route::prefix('v1')->middleware('log.activity')->group(function () {
 
     Route::post('pos/midtrans/notification', [\App\Http\Controllers\Api\V1\MidtransController::class, 'notification']);
 
-
     Route::prefix('auth')->group(function () {
         Route::post('login',      [AuthController::class, 'login']);
         Route::post('mfa/verify', [AuthController::class, 'verifyMfa']);
@@ -142,7 +141,6 @@ Route::prefix('v1')->middleware('log.activity')->group(function () {
             Route::post('bi-chat',         [DashboardController::class, 'biChat']);
         });
 
-
         // ── Users (CEO only) ──────────────────────────────────────────────
         Route::apiResource('users', UserController::class)->middleware('permission:user.manage');
         Route::post('users/{user}/reset-password', [UserController::class, 'resetPassword'])
@@ -181,7 +179,8 @@ Route::prefix('v1')->middleware('log.activity')->group(function () {
             Route::put('verify-payment/{paymentId}',    [\App\Http\Controllers\Api\V1\AdminFeeController::class, 'verifyPayment'])->middleware('permission:admin_fee.approve');
         });
 
-        // ── Expenses (CEO payment reminders) ──────────────────────────────
+        // ── Expenses (CEO payment reminders & Categories fallback) ─────────
+        Route::get('expense-categories', [\App\Http\Controllers\Api\V1\ExpenseController::class, 'categories'])->middleware('permission:finance.read');
         Route::prefix('expenses')->middleware('permission:finance.read')->group(function () {
             Route::get('/',                   [\App\Http\Controllers\Api\V1\ExpenseController::class, 'index']);
             Route::post('/',                  [\App\Http\Controllers\Api\V1\ExpenseController::class, 'store'])->middleware('permission:finance.create');

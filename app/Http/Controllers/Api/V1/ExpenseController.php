@@ -46,12 +46,33 @@ class ExpenseController extends Controller
         return response()->json($expenses);
     }
 
+    // ── Categories ────────────────────────────────────────────────────────
+    public function categories(): JsonResponse
+    {
+        $categories = \App\Models\ExpenseCategory::where('active', true)->orderBy('name')->get();
+        return response()->json([
+            'data'       => $categories,
+            'categories' => $categories,
+        ]);
+    }
+
+    public function storeCategory(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'name'       => 'required|string|max:100',
+            'account_id' => 'nullable|exists:accounts,id',
+            'active'     => 'boolean',
+        ]);
+        $category = \App\Models\ExpenseCategory::create($data);
+        return response()->json(['message' => 'Kategori berhasil dibuat.', 'category' => $category], 201);
+    }
+
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'name'               => 'required|string|max:200',
-            'amount'             => 'nullable|numeric|min:0',
-            'frequency'          => 'required|in:daily,weekly,monthly',
+            'name'               => 'nullable|string|max:200',
+            'amount'             => 'required|numeric|min:0',
+            'frequency'          => 'nullable|in:daily,weekly,monthly',
             'reminder_day'       => 'nullable|integer|min:0|max:6',
             'reminder_date'      => 'nullable|integer|min:1|max:31',
             'bank_name'          => 'nullable|string|max:100',
@@ -59,20 +80,53 @@ class ExpenseController extends Controller
             'account_holder'     => 'nullable|string|max:200',
             'notes'              => 'nullable|string',
             'is_revenue_sharing' => 'boolean',
+            'category_id'        => 'nullable|exists:expense_categories,id',
+            'description'        => 'nullable|string|max:255',
+            'payment_method'     => 'nullable|string|in:cash,bank_transfer,credit_card,other',
+            'expense_date'       => 'nullable|date',
+            'outlet_id'          => 'nullable|exists:outlets,id',
         ]);
-        $data['created_by'] = auth()->id();
-        $data['created_at'] = now();
-        $data['updated_at'] = now();
-        $id = DB::table('expenses')->insertGetId($data);
-        return response()->json(['message' => 'Expense berhasil ditambahkan.', 'expense' => DB::table('expenses')->find($id)], 201);
+
+        $name = $data['name'] ?? ($data['description'] ?? 'Pengeluaran Kas');
+        $desc = $data['description'] ?? $name;
+
+        $expenseData = [
+            'name'               => $name,
+            'description'        => $desc,
+            'amount'             => (float)($data['amount'] ?? 0),
+            'frequency'          => $data['frequency'] ?? null,
+            'reminder_day'       => $data['reminder_day'] ?? null,
+            'reminder_date'      => $data['reminder_date'] ?? null,
+            'bank_name'          => $data['bank_name'] ?? null,
+            'bank_account'       => $data['bank_account'] ?? null,
+            'account_holder'     => $data['account_holder'] ?? null,
+            'notes'              => $data['notes'] ?? null,
+            'is_revenue_sharing' => (bool)($data['is_revenue_sharing'] ?? false),
+            'category_id'        => $data['category_id'] ?? (\App\Models\ExpenseCategory::first()?->id ?? null),
+            'outlet_id'          => $data['outlet_id'] ?? (auth()->user()?->outlet_id ?? \App\Models\Outlet::first()?->id ?? 1),
+            'expense_date'       => $data['expense_date'] ?? now()->toDateString(),
+            'payment_method'     => $data['payment_method'] ?? 'cash',
+            'status'             => 'paid',
+            'created_by'         => auth()->id(),
+        ];
+
+        $expense = \App\Models\Expense::create($expenseData);
+
+        return response()->json([
+            'message' => 'Expense berhasil ditambahkan.',
+            'expense' => $expense->load('category'),
+        ], 201);
     }
 
     public function update(Request $request, int $id): JsonResponse
     {
+        $expense = \App\Models\Expense::find($id);
+        if (!$expense) return response()->json(['message' => 'Tidak ditemukan.'], 404);
+
         $data = $request->validate([
-            'name'               => 'sometimes|string|max:200',
+            'name'               => 'sometimes|nullable|string|max:200',
             'amount'             => 'nullable|numeric|min:0',
-            'frequency'          => 'sometimes|in:daily,weekly,monthly',
+            'frequency'          => 'sometimes|nullable|in:daily,weekly,monthly',
             'reminder_day'       => 'nullable|integer|min:0|max:6',
             'reminder_date'      => 'nullable|integer|min:1|max:31',
             'bank_name'          => 'nullable|string|max:100',
@@ -80,15 +134,32 @@ class ExpenseController extends Controller
             'account_holder'     => 'nullable|string|max:200',
             'notes'              => 'nullable|string',
             'is_revenue_sharing' => 'boolean',
+            'category_id'        => 'nullable|exists:expense_categories,id',
+            'description'        => 'nullable|string|max:255',
+            'payment_method'     => 'nullable|string',
+            'expense_date'       => 'nullable|date',
+            'status'             => 'nullable|string',
         ]);
-        $data['updated_at'] = now();
-        DB::table('expenses')->where('id', $id)->update($data);
-        return response()->json(['message' => 'Expense berhasil diperbarui.']);
+
+        if (isset($data['name']) && !isset($data['description'])) {
+            $data['description'] = $data['name'];
+        }
+        if (isset($data['description']) && !isset($data['name'])) {
+            $data['name'] = $data['description'];
+        }
+
+        $expense->update($data);
+        return response()->json(['message' => 'Expense berhasil diperbarui.', 'expense' => $expense->fresh()]);
     }
 
     public function destroy(int $id): JsonResponse
     {
-        DB::table('expenses')->where('id', $id)->update(['deleted_at' => now()]);
+        $expense = \App\Models\Expense::find($id);
+        if ($expense) {
+            $expense->delete();
+        } else {
+            DB::table('expenses')->where('id', $id)->update(['deleted_at' => now()]);
+        }
         return response()->json(['message' => 'Expense berhasil dihapus.']);
     }
 

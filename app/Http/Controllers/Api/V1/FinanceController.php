@@ -8,6 +8,7 @@ use App\Models\PosOrder;
 use App\Models\PurchaseOrder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class FinanceController extends Controller
@@ -17,6 +18,12 @@ class FinanceController extends Controller
      */
     private function syncInventoryExpenses(): void
     {
+        // 20-minute cache lock to optimize query load on read-only financial endpoints
+        if (Cache::has('sync_inventory_expenses_lock')) {
+            return;
+        }
+        Cache::put('sync_inventory_expenses_lock', true, now()->addMinutes(20));
+
         $userId   = auth()->id() ?? DB::table('users')->value('id');
         $outletId = auth()->user()?->outlet_id ?? DB::table('outlets')->value('id');
 
@@ -152,7 +159,7 @@ class FinanceController extends Controller
         $startDate = $request->get('start_date');
         $endDate   = $request->get('end_date', $startDate);
 
-        $posQuery = PosOrder::whereNotIn('status', ['cancelled', 'rejected']);
+        $posQuery = PosOrder::whereNotIn('status', ['void', 'refunded', 'pending', 'cancelled', 'rejected']);
         if ($startDate) {
             $posQuery->whereBetween('created_at', [
                 \Carbon\Carbon::parse($startDate)->startOfDay(),
@@ -198,7 +205,7 @@ class FinanceController extends Controller
             $end    = now()->endOfMonth();
         }
 
-        $revenue = PosOrder::whereNotIn('status', ['cancelled', 'rejected'])
+        $revenue = PosOrder::whereNotIn('status', ['void', 'refunded', 'pending', 'cancelled', 'rejected'])
             ->whereBetween('created_at', [$start, $end])
             ->selectRaw('DATE(created_at) as date, SUM(total_amount) as total')
             ->groupBy('date')
@@ -249,16 +256,23 @@ class FinanceController extends Controller
         $startDate = $request->get('start_date', now()->startOfMonth()->toDateString());
         $endDate   = $request->get('end_date',   now()->toDateString());
 
-        $revenue = PosOrder::whereNotIn('status', ['cancelled', 'rejected'])
+        $revenue = (float) PosOrder::whereNotIn('status', ['void', 'refunded', 'pending', 'cancelled', 'rejected'])
             ->whereBetween(DB::raw('DATE(created_at)'), [$startDate, $endDate])
             ->sum('total_amount');
 
-        $cogs = PosOrder::whereNotIn('status', ['cancelled', 'rejected'])
+        $cogs = (float) PosOrder::whereNotIn('status', ['void', 'refunded', 'pending', 'cancelled', 'rejected'])
             ->whereBetween(DB::raw('DATE(created_at)'), [$startDate, $endDate])
             ->sum('total_cost');
 
-        $expenses = Expense::whereBetween('expense_date', [$startDate, $endDate])
+        $expenses = (float) Expense::whereBetween('expense_date', [$startDate, $endDate])
             ->where('status', '!=', 'rejected')
+            ->where(function ($q) {
+                $q->whereNull('notes')
+                  ->orWhere('notes', 'not like', '%Auto-generated%');
+            })
+            ->where('description', 'not like', '%Kulakan%')
+            ->where('description', 'not like', '%Restock%')
+            ->where('description', 'not like', '%Inventory%')
             ->sum('amount');
 
         $grossProfit = $revenue - $cogs;
@@ -268,6 +282,13 @@ class FinanceController extends Controller
         $expenseBreakdown = Expense::with('category')
             ->whereBetween('expense_date', [$startDate, $endDate])
             ->where('status', '!=', 'rejected')
+            ->where(function ($q) {
+                $q->whereNull('notes')
+                  ->orWhere('notes', 'not like', '%Auto-generated%');
+            })
+            ->where('description', 'not like', '%Kulakan%')
+            ->where('description', 'not like', '%Restock%')
+            ->where('description', 'not like', '%Inventory%')
             ->selectRaw('category_id, SUM(amount) as total')
             ->groupBy('category_id')
             ->get();
@@ -312,7 +333,7 @@ class FinanceController extends Controller
         // 1. Fetch Inflows (POS Orders) unless type is expense/outflow
         if ($type !== 'expense' && $type !== 'outflow') {
             $ordQuery = PosOrder::with(['cashier'])
-                ->whereNotIn('status', ['cancelled', 'rejected']);
+                ->whereNotIn('status', ['void', 'refunded', 'pending', 'cancelled', 'rejected']);
 
             if ($startDate) {
                 $ordQuery->whereBetween('created_at', [
